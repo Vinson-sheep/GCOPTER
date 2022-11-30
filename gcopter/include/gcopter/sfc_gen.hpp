@@ -51,6 +51,7 @@ namespace sfc_gen
                            const double &timeout,
                            std::vector<Eigen::Vector3d> &p)
     {
+        // global planning
         auto space(std::make_shared<ompl::base::RealVectorStateSpace>(3));
 
         ompl::base::RealVectorBounds bounds(3);
@@ -124,7 +125,7 @@ namespace sfc_gen
     {
         hpolys.clear();
         const int n = path.size();
-        Eigen::Matrix<double, 6, 4> bd = Eigen::Matrix<double, 6, 4>::Zero();
+        Eigen::Matrix<double, 6, 4> bd = Eigen::Matrix<double, 6, 4>::Zero();   // boundary
         bd(0, 0) = 1.0;
         bd(1, 0) = -1.0;
         bd(2, 1) = 1.0;
@@ -132,13 +133,14 @@ namespace sfc_gen
         bd(4, 2) = 1.0;
         bd(5, 2) = -1.0;
 
-        Eigen::MatrixX4d hp, gap;
-        Eigen::Vector3d a, b = path[0];
+        Eigen::MatrixX4d hp, gap;   // hp: cur polygon, gap: 
+        Eigen::Vector3d a, b = path[0]; // last waypoints, next waypoints
         std::vector<Eigen::Vector3d> valid_pc;
-        std::vector<Eigen::Vector3d> bs;
+        std::vector<Eigen::Vector3d> bs;    // modified path
         valid_pc.reserve(points.size());
-        for (int i = 1; i < n;)
+        for (int i = 1; i < n;) // start is not need to calculate
         {
+            // restrict point-point distance
             a = b;
             if ((a - path[i]).norm() > progress)
             {
@@ -151,6 +153,7 @@ namespace sfc_gen
             }
             bs.emplace_back(b);
 
+            // set check boundary
             bd(0, 3) = -std::min(std::max(a(0), b(0)) + range, highCorner(0));
             bd(1, 3) = +std::max(std::min(a(0), b(0)) - range, lowCorner(0));
             bd(2, 3) = -std::min(std::max(a(1), b(1)) + range, highCorner(1));
@@ -158,6 +161,7 @@ namespace sfc_gen
             bd(4, 3) = -std::min(std::max(a(2), b(2)) + range, highCorner(2));
             bd(5, 3) = +std::max(std::min(a(2), b(2)) - range, lowCorner(2));
 
+            // cut checkout point
             valid_pc.clear();
             for (const Eigen::Vector3d &p : points)
             {
@@ -166,11 +170,13 @@ namespace sfc_gen
                     valid_pc.emplace_back(p);
                 }
             }
+
+            // change valid_pc to matrix
             Eigen::Map<const Eigen::Matrix<double, 3, -1, Eigen::ColMajor>> pc(valid_pc[0].data(), 3, valid_pc.size());
 
-            firi::firi(bd, pc, a, b, hp);
+            firi::firi(bd, pc, a, b, hp);   // get hp
 
-            if (hpolys.size() != 0)
+            if (hpolys.size() != 0) // if cur polygon is not the first
             {
                 const Eigen::Vector4d ah(a(0), a(1), a(2), 1.0);
                 if (3 <= ((hp * ah).array() > -eps).cast<int>().sum() +
@@ -180,7 +186,7 @@ namespace sfc_gen
                     hpolys.emplace_back(gap);
                 }
             }
-
+            // push back cur polygon
             hpolys.emplace_back(hp);
         }
     }

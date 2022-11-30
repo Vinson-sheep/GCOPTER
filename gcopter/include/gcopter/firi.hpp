@@ -264,49 +264,52 @@ namespace firi
         return ret >= 0;
     }
 
-    inline bool firi(const Eigen::MatrixX4d &bd,
-                     const Eigen::Matrix3Xd &pc,
-                     const Eigen::Vector3d &a,
-                     const Eigen::Vector3d &b,
-                     Eigen::MatrixX4d &hPoly,
+    inline bool firi(const Eigen::MatrixX4d &bd, // boundary
+                     const Eigen::Matrix3Xd &pc,    // checkout points
+                     const Eigen::Vector3d &a,  // start
+                     const Eigen::Vector3d &b,  // goal
+                     Eigen::MatrixX4d &hPoly,   // target H-ploygon
                      const int iterations = 4,
                      const double epsilon = 1.0e-6)
     {
         const Eigen::Vector4d ah(a(0), a(1), a(2), 1.0);
         const Eigen::Vector4d bh(b(0), b(1), b(2), 1.0);
 
+        // if start and goal is not in the boundary, return false
         if ((bd * ah).maxCoeff() > 0.0 ||
             (bd * bh).maxCoeff() > 0.0)
         {
             return false;
         }
+        // 
+        const int M = bd.rows(); // 6
+        const int N = pc.cols();    // checkpoints number
 
-        const int M = bd.rows();
-        const int N = pc.cols();
-
-        Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
-        Eigen::Vector3d p = 0.5 * (a + b);
-        Eigen::Vector3d r = Eigen::Vector3d::Ones();
-        Eigen::MatrixX4d forwardH(M + N, 4);
+        // initialize: not rotation, center in (a+b)/2, is a sphere.
+        Eigen::Matrix3d R = Eigen::Matrix3d::Identity();    // A
+        Eigen::Vector3d p = 0.5 * (a + b);  // b
+        Eigen::Vector3d r = Eigen::Vector3d::Ones();    // D
+        Eigen::MatrixX4d forwardH(M + N, 4);    // ??
         int nH = 0;
 
         for (int loop = 0; loop < iterations; ++loop)
         {
-            const Eigen::Matrix3d forward = r.cwiseInverse().asDiagonal() * R.transpose();
-            const Eigen::Matrix3d backward = R * r.asDiagonal();
+            const Eigen::Matrix3d forward = r.cwiseInverse().asDiagonal() * R.transpose(); // D^-1 * A^T
+            const Eigen::Matrix3d backward = R * r.asDiagonal();    // A * D
             const Eigen::MatrixX3d forwardB = bd.leftCols<3>() * backward;
             const Eigen::VectorXd forwardD = bd.rightCols<1>() + bd.leftCols<3>() * p;
-            const Eigen::Matrix3Xd forwardPC = forward * (pc.colwise() - p);
-            const Eigen::Vector3d fwd_a = forward * (a - p);
-            const Eigen::Vector3d fwd_b = forward * (b - p);
+            const Eigen::Matrix3Xd forwardPC = forward * (pc.colwise() - p);    //  forward valid checkpoints 
+            const Eigen::Vector3d fwd_a = forward * (a - p);    // forward point a
+            const Eigen::Vector3d fwd_b = forward * (b - p);    // forward point b
 
-            const Eigen::VectorXd distDs = forwardD.cwiseAbs().cwiseQuotient(forwardB.rowwise().norm());
-            Eigen::MatrixX4d tangents(N, 4);
-            Eigen::VectorXd distRs(N);
+            const Eigen::VectorXd distDs = forwardD.cwiseAbs().cwiseQuotient(forwardB.rowwise().norm()); // ??
+            Eigen::MatrixX4d tangents(N, 4);    // ??
+            Eigen::VectorXd distRs(N); // ??
 
+            // Calculate the maximum expansion ratio
             for (int i = 0; i < N; i++)
             {
-                distRs(i) = forwardPC.col(i).norm();
+                distRs(i) = forwardPC.col(i).norm();    // distance between forward checkpoints and origin
                 tangents(i, 3) = -distRs(i);
                 tangents.block<1, 3>(i, 0) = forwardPC.col(i).transpose() / distRs(i);
                 if (tangents.block<1, 3>(i, 0).dot(fwd_a) + tangents(i, 3) > epsilon)
@@ -346,6 +349,7 @@ namespace firi
             {
                 minSqrR = distRs.minCoeff(&pcMinId);
             }
+            // Select the tightest half space
             for (int i = 0; !completed && i < (M + N); ++i)
             {
                 if (minSqrD < minSqrR)

@@ -54,7 +54,7 @@ struct Config
         nh_priv.getParam("MapBound", mapBound);
         nh_priv.getParam("TimeoutRRT", timeoutRRT);
         nh_priv.getParam("MaxVelMag", maxVelMag);
-        nh_priv.getParam("MaxBdrMag", maxBdrMag);
+        nh_priv.getParam("MaxBdrMag", maxBdrMag); // ?
         nh_priv.getParam("MaxTiltAngle", maxTiltAngle);
         nh_priv.getParam("MinThrust", minThrust);
         nh_priv.getParam("MaxThrust", maxThrust);
@@ -62,13 +62,13 @@ struct Config
         nh_priv.getParam("GravAcc", gravAcc);
         nh_priv.getParam("HorizDrag", horizDrag);
         nh_priv.getParam("VertDrag", vertDrag);
-        nh_priv.getParam("ParasDrag", parasDrag);
-        nh_priv.getParam("SpeedEps", speedEps);
-        nh_priv.getParam("WeightT", weightT);
-        nh_priv.getParam("ChiVec", chiVec);
+        nh_priv.getParam("ParasDrag", parasDrag); // ?
+        nh_priv.getParam("SpeedEps", speedEps); // ?
+        nh_priv.getParam("WeightT", weightT); // ?
+        nh_priv.getParam("ChiVec", chiVec); // ?
         nh_priv.getParam("SmoothingEps", smoothingEps);
-        nh_priv.getParam("IntegralIntervs", integralIntervs);
-        nh_priv.getParam("RelCostTol", relCostTol);
+        nh_priv.getParam("IntegralIntervs", integralIntervs); // ?
+        nh_priv.getParam("RelCostTol", relCostTol); // ?
     }
 };
 
@@ -97,23 +97,29 @@ public:
           mapInitialized(false),
           visualizer(nh)
     {
+        // vexel map size
         const Eigen::Vector3i xyz((config.mapBound[1] - config.mapBound[0]) / config.voxelWidth,
                                   (config.mapBound[3] - config.mapBound[2]) / config.voxelWidth,
                                   (config.mapBound[5] - config.mapBound[4]) / config.voxelWidth);
 
+        // vexel map offeset
         const Eigen::Vector3d offset(config.mapBound[0], config.mapBound[2], config.mapBound[4]);
 
+        // initialize map
         voxelMap = voxel_map::VoxelMap(xyz, offset, config.voxelWidth);
 
+        // subscribe map
         mapSub = nh.subscribe(config.mapTopic, 1, &GlobalPlanner::mapCallBack, this,
                               ros::TransportHints().tcpNoDelay());
 
+        // subscribe target
         targetSub = nh.subscribe(config.targetTopic, 1, &GlobalPlanner::targetCallBack, this,
                                  ros::TransportHints().tcpNoDelay());
     }
 
     inline void mapCallBack(const sensor_msgs::PointCloud2::ConstPtr &msg)
     {
+        // set local map
         if (!mapInitialized)
         {
             size_t cur = 0;
@@ -142,8 +148,9 @@ public:
 
     inline void plan()
     {
-        if (startGoal.size() == 2)
+        if (startGoal.size() == 2) // if start-goal is ready
         {
+            // global planner
             std::vector<Eigen::Vector3d> route;
             sfc_gen::planPath<voxel_map::VoxelMap>(startGoal[0],
                                                    startGoal[1],
@@ -155,6 +162,7 @@ public:
             std::vector<Eigen::Vector3d> pc;
             voxelMap.getSurf(pc);
 
+            // Fast region iteration
             sfc_gen::convexCover(route,
                                  pc,
                                  voxelMap.getOrigin(),
@@ -162,10 +170,13 @@ public:
                                  7.0,
                                  3.0,
                                  hPolys);
+
+            // shortcut region
             sfc_gen::shortCut(hPolys);
 
             if (route.size() > 1)
             {
+                // visualize region
                 visualizer.visualizePolytope(hPolys);
 
                 Eigen::Matrix3d iniState;
@@ -220,7 +231,7 @@ public:
                     return;
                 }
 
-                if (traj.getPieceNum() > 0)
+                if (traj.getPieceNum() > 0) // if trajectory is ok
                 {
                     trajStamp = ros::Time::now().toSec();
                     visualizer.visualize(traj, route);
@@ -237,11 +248,12 @@ public:
             {
                 startGoal.clear();
             }
+            // calculate goal z-axis position
             const double zGoal = config.mapBound[4] + config.dilateRadius +
                                  fabs(msg->pose.orientation.z) *
                                      (config.mapBound[5] - config.mapBound[4] - 2 * config.dilateRadius);
             const Eigen::Vector3d goal(msg->pose.position.x, msg->pose.position.y, zGoal);
-            if (voxelMap.query(goal) == 0)
+            if (voxelMap.query(goal) == 0)   // if goal is in free space
             {
                 visualizer.visualizeStartGoal(goal, 0.5, startGoal.size());
                 startGoal.emplace_back(goal);
@@ -258,6 +270,7 @@ public:
 
     inline void process()
     {
+        // differential flatness
         Eigen::VectorXd physicalParams(6);
         physicalParams(0) = config.vehicleMass;
         physicalParams(1) = config.gravAcc;
@@ -266,19 +279,20 @@ public:
         physicalParams(4) = config.parasDrag;
         physicalParams(5) = config.speedEps;
 
-        flatness::FlatnessMap flatmap;
+        flatness::FlatnessMap flatmap;  // mapping
         flatmap.reset(physicalParams(0), physicalParams(1), physicalParams(2),
                       physicalParams(3), physicalParams(4), physicalParams(5));
 
-        if (traj.getPieceNum() > 0)
+        if (traj.getPieceNum() > 0) // if trajectory is ready
         {
             const double delta = ros::Time::now().toSec() - trajStamp;
-            if (delta > 0.0 && delta < traj.getTotalDuration())
+            if (delta > 0.0 && delta < traj.getTotalDuration()) // if it is time to execute
             {
                 double thr;
                 Eigen::Vector4d quat;
                 Eigen::Vector3d omg;
-
+                // flatmap is a model
+                // forward is to calculate the state
                 flatmap.forward(traj.getVel(delta),
                                 traj.getAcc(delta),
                                 traj.getJer(delta),
@@ -296,7 +310,7 @@ public:
                 visualizer.thrPub.publish(thrMsg);
                 visualizer.tiltPub.publish(tiltMsg);
                 visualizer.bdrPub.publish(bdrMsg);
-
+                // visualize
                 visualizer.visualizeSphere(traj.getPos(delta),
                                            config.dilateRadius);
             }
