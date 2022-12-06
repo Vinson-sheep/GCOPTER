@@ -290,44 +290,51 @@ namespace firi
         Eigen::Vector3d p = 0.5 * (a + b);  // b
         Eigen::Vector3d r = Eigen::Vector3d::Ones();    // D
         Eigen::MatrixX4d forwardH(M + N, 4);    // ??
-        int nH = 0;
+        int nH = 0; // ??
 
         for (int loop = 0; loop < iterations; ++loop)
         {
             const Eigen::Matrix3d forward = r.cwiseInverse().asDiagonal() * R.transpose(); // D^-1 * A^T
             const Eigen::Matrix3d backward = R * r.asDiagonal();    // A * D
-            const Eigen::MatrixX3d forwardB = bd.leftCols<3>() * backward;
+            const Eigen::MatrixX3d forwardB = bd.leftCols<3>() * backward;  // boundary
             const Eigen::VectorXd forwardD = bd.rightCols<1>() + bd.leftCols<3>() * p;
             const Eigen::Matrix3Xd forwardPC = forward * (pc.colwise() - p);    //  forward valid checkpoints 
             const Eigen::Vector3d fwd_a = forward * (a - p);    // forward point a
             const Eigen::Vector3d fwd_b = forward * (b - p);    // forward point b
 
             const Eigen::VectorXd distDs = forwardD.cwiseAbs().cwiseQuotient(forwardB.rowwise().norm()); // ??
-            Eigen::MatrixX4d tangents(N, 4);    // ??
-            Eigen::VectorXd distRs(N); // ??
+            Eigen::MatrixX4d tangents(N, 4);    // the first three element is the normalized forward checkpoints, the fourth is the -distance;
+            Eigen::VectorXd distRs(N); // distance between forward checkpoints and origin
 
             // Calculate the maximum expansion ratio
             for (int i = 0; i < N; i++)
             {
-                distRs(i) = forwardPC.col(i).norm();    // distance between forward checkpoints and origin
+                // update tangents & distRs
+                distRs(i) = forwardPC.col(i).norm();    // squaredNorm?
                 tangents(i, 3) = -distRs(i);
                 tangents.block<1, 3>(i, 0) = forwardPC.col(i).transpose() / distRs(i);
+                // if forward a point is not included in half space
+                // adjust normalized forward checkpoints
                 if (tangents.block<1, 3>(i, 0).dot(fwd_a) + tangents(i, 3) > epsilon)
                 {
-                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_a;
-                    tangents.block<1, 3>(i, 0) = fwd_a - (delta.dot(fwd_a) / delta.squaredNorm()) * delta;
+                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_a; // distance  between a point and checkpoints
+                    tangents.block<1, 3>(i, 0) = fwd_a - (delta.dot(fwd_a) / delta.squaredNorm()) * delta; 
                     distRs(i) = tangents.block<1, 3>(i, 0).norm();
                     tangents(i, 3) = -distRs(i);
                     tangents.block<1, 3>(i, 0) /= distRs(i);
                 }
+                // if forward b point is not included in half space
+                // adjust normalized forward checkpoints
                 if (tangents.block<1, 3>(i, 0).dot(fwd_b) + tangents(i, 3) > epsilon)
                 {
-                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_b;
+                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_b; 
                     tangents.block<1, 3>(i, 0) = fwd_b - (delta.dot(fwd_b) / delta.squaredNorm()) * delta;
                     distRs(i) = tangents.block<1, 3>(i, 0).norm();
                     tangents(i, 3) = -distRs(i);
                     tangents.block<1, 3>(i, 0) /= distRs(i);
                 }
+                // if forward a point is not still included in half space
+                // ??
                 if (tangents.block<1, 3>(i, 0).dot(fwd_a) + tangents(i, 3) > epsilon)
                 {
                     tangents.block<1, 3>(i, 0) = (fwd_a - forwardPC.col(i)).cross(fwd_b - forwardPC.col(i)).normalized();
@@ -336,6 +343,8 @@ namespace firi
                 }
             }
 
+            // the M boundary is the limitation out of the checkpoints
+            // declare the visited flag of boundaryand checkpoints
             Eigen::Matrix<uint8_t, -1, 1> bdFlags = Eigen::Matrix<uint8_t, -1, 1>::Constant(M, 1);
             Eigen::Matrix<uint8_t, -1, 1> pcFlags = Eigen::Matrix<uint8_t, -1, 1>::Constant(N, 1);
 
@@ -352,12 +361,14 @@ namespace firi
             // Select the tightest half space
             for (int i = 0; !completed && i < (M + N); ++i)
             {
+                // if tightest half space is in boundary
                 if (minSqrD < minSqrR)
                 {
                     forwardH.block<1, 3>(nH, 0) = forwardB.row(bdMinId);
                     forwardH(nH, 3) = forwardD(bdMinId);
                     bdFlags(bdMinId) = 0;
                 }
+                // if tightest half space is in checkpoints
                 else
                 {
                     forwardH.row(nH) = tangents.row(pcMinId);
@@ -368,7 +379,7 @@ namespace firi
                 minSqrD = INFINITY;
                 for (int j = 0; j < M; ++j)
                 {
-                    if (bdFlags(j))
+                    if (bdFlags(j)) // if boundary is not visited
                     {
                         completed = false;
                         if (minSqrD > distDs(j))
@@ -381,12 +392,14 @@ namespace firi
                 minSqrR = INFINITY;
                 for (int j = 0; j < N; ++j)
                 {
-                    if (pcFlags(j))
+                    if (pcFlags(j)) // if checkpoints is not visited
                     {
+                        // if not be included in new half space, filter it.
                         if (forwardH.block<1, 3>(nH, 0).dot(forwardPC.col(j)) + forwardH(nH, 3) > -epsilon)
                         {
                             pcFlags(j) = 0;
                         }
+                        // else, update idx
                         else
                         {
                             completed = false;
@@ -400,7 +413,7 @@ namespace firi
                 }
                 ++nH;
             }
-
+            // return to polygon of original space
             hPoly.resize(nH, 4);
             for (int i = 0; i < nH; ++i)
             {

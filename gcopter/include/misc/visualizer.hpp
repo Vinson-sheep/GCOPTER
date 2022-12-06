@@ -173,11 +173,12 @@ public:
         {
             oldTris = mesh;
             Eigen::Matrix<double, 3, -1, Eigen::ColMajor> vPoly;
+            // transform H-representation to v-representation
             geo_utils::enumerateVs(hPolys[id], vPoly);
 
             quickhull::QuickHull<double> tinyQH;
             const auto polyHull = tinyQH.getConvexHull(vPoly.data(), vPoly.cols(), false, true);
-            const auto &idxBuffer = polyHull.getIndexBuffer();
+            const auto &idxBuffer = polyHull.getIndexBuffer();  // triangle  in Intermediate process
             int hNum = idxBuffer.size() / 3;
 
             curTris.resize(3, hNum * 3);
@@ -185,6 +186,7 @@ public:
             {
                 curTris.col(i) = vPoly.col(idxBuffer[i]);
             }
+            // why the old triangles is include?
             mesh.resize(3, oldTris.cols() + curTris.cols());
             mesh.leftCols(oldTris.cols()) = oldTris;
             mesh.rightCols(curTris.cols()) = curTris;

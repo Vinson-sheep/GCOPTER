@@ -104,6 +104,7 @@ namespace gcopter
         static inline void backwardT(const Eigen::VectorXd &T,
                                      EIGENVEC &tau)
         {
+            // 
             const int sizeT = T.size();
             tau.resize(sizeT);
             for (int i = 0; i < sizeT; i++)
@@ -148,6 +149,7 @@ namespace gcopter
             const int sizeP = vIdx.size();
             P.resize(3, sizeP);
             Eigen::VectorXd q;
+            // formula (4-29)
             for (int i = 0, j = 0, k, l; i < sizeP; i++, j += k)
             {
                 l = vIdx(i);
@@ -163,13 +165,14 @@ namespace gcopter
                                          const Eigen::VectorXd &xi,
                                          Eigen::VectorXd &gradXi)
         {
-            const int n = xi.size();
+            // what is NLS?
+            const int n = xi.size(); // optimize variables size
             const Eigen::Matrix3Xd &ovPoly = *(Eigen::Matrix3Xd *)ptr;
 
-            const double sqrNormXi = xi.squaredNorm();
-            const double invNormXi = 1.0 / sqrt(sqrNormXi);
-            const Eigen::VectorXd unitXi = xi * invNormXi;
-            const Eigen::VectorXd r = unitXi.head(n - 1);
+            const double sqrNormXi = xi.squaredNorm(); // squareNorm
+            const double invNormXi = 1.0 / sqrt(sqrNormXi); // 1 / norm
+            const Eigen::VectorXd unitXi = xi * invNormXi; // normalized xi
+            const Eigen::VectorXd r = unitXi.head(n - 1);   // ??
             const Eigen::Vector3d delta = ovPoly.rightCols(n - 1) * r.cwiseProduct(r) +
                                           ovPoly.col(1) - ovPoly.col(0);
 
@@ -198,6 +201,7 @@ namespace gcopter
                                      const PolyhedraV &vPolys,
                                      EIGENVEC &xi)
         {
+            // optimize ?
             const int sizeP = P.cols();
 
             double minSqrD;
@@ -207,17 +211,19 @@ namespace gcopter
             tiny_nls_params.g_epsilon = FLT_EPSILON;
             tiny_nls_params.max_iterations = 128;
 
-            Eigen::Matrix3Xd ovPoly;
+            Eigen::Matrix3Xd ovPoly;    // the poly concludes v-ploy and origin
             for (int i = 0, j = 0, k, l; i < sizeP; i++, j += k)
             {
-                l = vIdx(i);
-                k = vPolys[l].cols();
+                l = vIdx(i);    // v-ploy idx
+                k = vPolys[l].cols(); // count of v-ploy points
 
+                // construct ovPoly
                 ovPoly.resize(3, k + 1);
                 ovPoly.col(0) = P.col(i);
                 ovPoly.rightCols(k) = vPolys[l];
+                // 
                 Eigen::VectorXd x(k);
-                x.setConstant(sqrt(1.0 / k));
+                x.setConstant(sqrt(1.0 / k));   // why is sqrt() ?
                 lbfgs::lbfgs_optimize(x,
                                       minSqrD,
                                       &GCOPTER_PolytopeSFC::costTinyNLS,
@@ -586,25 +592,30 @@ namespace gcopter
             return cost;
         }
 
-        static inline void getShortestPath(const Eigen::Vector3d &ini,
-                                           const Eigen::Vector3d &fin,
-                                           const PolyhedraV &vPolys,
-                                           const double &smoothD,
-                                           Eigen::Matrix3Xd &path)
+        static inline void getShortestPath(const Eigen::Vector3d &ini,  // start
+                                           const Eigen::Vector3d &fin,  // goal
+                                           const PolyhedraV &vPolys,    // v-polys in global path
+                                           const double &smoothD,   // 
+                                           Eigen::Matrix3Xd &path)  // target path
         {
+            // 
+
+            // so half of the elements of vPolys are repeated?
             const int overlaps = vPolys.size() / 2;
-            Eigen::VectorXi vSizes(overlaps);
+            Eigen::VectorXi vSizes(overlaps);   
+            // get single v-poly size
             for (int i = 0; i < overlaps; i++)
             {
                 vSizes(i) = vPolys[2 * i + 1].cols();
             }
+            // set element of xi the 1/n
             Eigen::VectorXd xi(vSizes.sum());
             for (int i = 0, j = 0; i < overlaps; i++)
             {
                 xi.segment(j, vSizes(i)).setConstant(sqrt(1.0 / vSizes(i)));
                 j += vSizes(i);
             }
-
+            // set lbfgs params
             double minDistance;
             void *dataPtrs[4];
             dataPtrs[0] = (void *)(&smoothD);
@@ -615,7 +626,10 @@ namespace gcopter
             shortest_path_params.past = 3;
             shortest_path_params.delta = 1.0e-3;
             shortest_path_params.g_epsilon = 1.0e-5;
-
+            // lbfgs optimize
+            // Note: the author here turn the shortest path problem 
+            // into a numerical optimization problem
+            // 
             lbfgs::lbfgs_optimize(xi,
                                   minDistance,
                                   &GCOPTER_PolytopeSFC::costDistance,
@@ -623,8 +637,8 @@ namespace gcopter
                                   nullptr,
                                   dataPtrs,
                                   shortest_path_params);
-
-            path.resize(3, overlaps + 2);
+            // 
+            path.resize(3, overlaps + 2); // +2 is the start and goal
             path.leftCols<1>() = ini;
             path.rightCols<1>() = fin;
             Eigen::VectorXd r;
@@ -632,9 +646,10 @@ namespace gcopter
             {
                 k = vPolys[2 * i + 1].cols();
                 Eigen::Map<const Eigen::VectorXd> q(xi.data() + j, k);
-                r = q.normalized().head(k - 1);
+                r = q.normalized().head(k - 1); // why ignore the last element?
+                // r.cwiseProduct(r) here is element-wise squared.
                 path.col(i + 1) = vPolys[2 * i + 1].rightCols(k - 1) * r.cwiseProduct(r) +
-                                  vPolys[2 * i + 1].col(0);
+                                  vPolys[2 * i + 1].col(0); // why ?
             }
 
             return;
@@ -643,6 +658,7 @@ namespace gcopter
         static inline bool processCorridor(const PolyhedraH &hPs,
                                            PolyhedraV &vPs)
         {
+            // get V-poly
             const int sizeCorridor = hPs.size() - 1;
 
             vPs.clear();
@@ -690,31 +706,32 @@ namespace gcopter
             return true;
         }
 
-        static inline void setInitial(const Eigen::Matrix3Xd &path,
-                                      const double &speed,
-                                      const Eigen::VectorXi &intervalNs,
-                                      Eigen::Matrix3Xd &innerPoints,
-                                      Eigen::VectorXd &timeAlloc)
+        static inline void setInitial(const Eigen::Matrix3Xd &path, // reference path
+                                      const double &speed,  // reference speed
+                                      const Eigen::VectorXi &intervalNs,    // pieces number
+                                      Eigen::Matrix3Xd &innerPoints,    // P
+                                      Eigen::VectorXd &timeAlloc)   // T
         {
-            const int sizeM = intervalNs.size();
-            const int sizeN = intervalNs.sum();
-            innerPoints.resize(3, sizeN - 1);
-            timeAlloc.resize(sizeN);
+            // Initialize P and T
+            const int sizeM = intervalNs.size();     // number of pieces
+            const int sizeN = intervalNs.sum(); // number of subpieces
+            innerPoints.resize(3, sizeN - 1);   // resize? it is not reasonable.
+            timeAlloc.resize(sizeN);    // the upper layer has allocated memory
 
             Eigen::Vector3d a, b, c;
             for (int i = 0, j = 0, k = 0, l; i < sizeM; i++)
             {
-                l = intervalNs(i);
-                a = path.col(i);
-                b = path.col(i + 1);
-                c = (b - a) / l;
-                timeAlloc.segment(j, l).setConstant(c.norm() / speed);
+                l = intervalNs(i);  // pieces count
+                a = path.col(i);    // the last point
+                b = path.col(i + 1);    // the next point
+                c = (b - a) / l;    //  the point between the last and next point
+                timeAlloc.segment(j, l).setConstant(c.norm() / speed);  // the time is set to the average time
                 j += l;
                 for (int m = 0; m < l; m++)
                 {
                     if (i > 0 || m > 0)
                     {
-                        innerPoints.col(k++) = a + c * m;
+                        innerPoints.col(k++) = a + c * m;   // the Pi is set to the average point
                     }
                 }
             }
@@ -741,12 +758,14 @@ namespace gcopter
             tailPVA = terminalPVA;
 
             hPolytopes = safeCorridor;
+            // normalize H-poly, make the fourth element become distance between origin and space
             for (size_t i = 0; i < hPolytopes.size(); i++)
             {
                 const Eigen::ArrayXd norms =
                     hPolytopes[i].leftCols<3>().rowwise().norm();
                 hPolytopes[i].array().colwise() /= norms;
             }
+            // get v-poly
             if (!processCorridor(hPolytopes, vPolytopes))
             {
                 return false;
@@ -760,15 +779,17 @@ namespace gcopter
             physicalPm = physicalParams;
             allocSpeed = magnitudeBd(0) * 3.0;
 
+            // ?
             getShortestPath(headPVA.col(0), tailPVA.col(0),
                             vPolytopes, smoothEps, shortPath);
-            const Eigen::Matrix3Xd deltas = shortPath.rightCols(polyN) - shortPath.leftCols(polyN);
-            pieceIdx = (deltas.colwise().norm() / lengthPerPiece).cast<int>().transpose();
-            pieceIdx.array() += 1;
-            pieceN = pieceIdx.sum();
+            const Eigen::Matrix3Xd deltas = shortPath.rightCols(polyN) - shortPath.leftCols(polyN);  //  next_point - last_point
+            // determine the subpieces according to the lengthPerPiece
+            pieceIdx = (deltas.colwise().norm() / lengthPerPiece).cast<int>().transpose(); 
+            pieceIdx.array() += 1;  // every pieces at least consist of one subpieces
+            pieceN = pieceIdx.sum();    // the number of all subpieces
 
-            temporalDim = pieceN;
-            spatialDim = 0;
+            temporalDim = pieceN;   // the dimention of T
+            spatialDim = 0; // the dimention of P
             vPolyIdx.resize(pieceN - 1);
             hPolyIdx.resize(pieceN);
             for (int i = 0, j = 0, k; i < polyN; i++)
@@ -778,7 +799,7 @@ namespace gcopter
                 {
                     if (l < k - 1)
                     {
-                        vPolyIdx(j) = 2 * i;
+                        vPolyIdx(j) = 2 * i;    // the v-poly idx of Pi 
                         spatialDim += vPolytopes[2 * i].cols();
                     }
                     else if (i < polyN - 1)
@@ -810,12 +831,14 @@ namespace gcopter
                                const double &relCostTol)
         {
             Eigen::VectorXd x(temporalDim + spatialDim);
-            Eigen::Map<Eigen::VectorXd> tau(x.data(), temporalDim);
-            Eigen::Map<Eigen::VectorXd> xi(x.data() + temporalDim, spatialDim);
-
+            Eigen::Map<Eigen::VectorXd> tau(x.data(), temporalDim); // agent of T
+            Eigen::Map<Eigen::VectorXd> xi(x.data() + temporalDim, spatialDim); // agent of P
+            
+            // points - p vector
+            // times - T vector
             setInitial(shortPath, allocSpeed, pieceIdx, points, times);
-            backwardT(times, tau);
-            backwardP(points, vPolyIdx, vPolytopes, xi);
+            backwardT(times, tau);  // get tau ?
+            backwardP(points, vPolyIdx, vPolytopes, xi);    // get xi ?
 
             double minCostFunctional;
             lbfgs_params.mem_size = 256;
@@ -834,9 +857,9 @@ namespace gcopter
 
             if (ret >= 0)
             {
-                forwardT(tau, times);
-                forwardP(xi, vPolyIdx, vPolytopes, points);
-                minco.setParameters(points, times);
+                forwardT(tau, times);   // recover T
+                forwardP(xi, vPolyIdx, vPolytopes, points); // recover P
+                minco.setParameters(points, times); 
                 minco.getTrajectory(traj);
             }
             else

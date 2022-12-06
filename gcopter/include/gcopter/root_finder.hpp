@@ -849,6 +849,7 @@ inline Eigen::VectorXd polyConv(const Eigen::VectorXd &lCoef, const Eigen::Vecto
 
 inline Eigen::VectorXd polySqr(const Eigen::VectorXd &coef)
 // Calculate self-convolution of coef(x)
+// P(x)^2
 {
     int coefSize = coef.size();
     int resultSize = coefSize * 2 - 1;
