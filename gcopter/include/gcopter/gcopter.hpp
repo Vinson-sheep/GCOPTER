@@ -104,9 +104,9 @@ namespace gcopter
         static inline void backwardT(const Eigen::VectorXd &T,
                                      EIGENVEC &tau)
         {
-            // 
+            // 跟论文没有关系
             const int sizeT = T.size();
-            tau.resize(sizeT);
+            tau.resize(sizeT); // 这里tau和T是一一对应的
             for (int i = 0; i < sizeT; i++)
             {
                 tau(i) = T(i) > 1.0
@@ -122,6 +122,7 @@ namespace gcopter
                                          const Eigen::VectorXd &gradT,
                                          EIGENVEC &gradTau)
         {
+            // 求T对tau的梯度
             const int sizeTau = tau.size();
             gradTau.resize(sizeTau);
             double denSqrt;
@@ -165,7 +166,7 @@ namespace gcopter
                                          const Eigen::VectorXd &xi,
                                          Eigen::VectorXd &gradXi)
         {
-            // what is NLS?
+            // 小规模非线性最小二乘优化
             const int n = xi.size(); // optimize variables size
             const Eigen::Matrix3Xd &ovPoly = *(Eigen::Matrix3Xd *)ptr;
 
@@ -174,14 +175,15 @@ namespace gcopter
             const Eigen::VectorXd unitXi = xi * invNormXi; // normalized xi
             const Eigen::VectorXd r = unitXi.head(n - 1);   // ??
             const Eigen::Vector3d delta = ovPoly.rightCols(n - 1) * r.cwiseProduct(r) +
-                                          ovPoly.col(1) - ovPoly.col(0);
+                                          ovPoly.col(1) - ovPoly.col(0); // xi对应的位置点与参考路径点作差
 
-            double cost = delta.squaredNorm();
+            double cost = delta.squaredNorm(); // 最小二乘
             gradXi.head(n - 1) = (ovPoly.rightCols(n - 1).transpose() * (2 * delta)).array() *
                                  r.array() * 2.0;
             gradXi(n - 1) = 0.0;
-            gradXi = (gradXi - unitXi.dot(gradXi) * unitXi).eval() * invNormXi;
+            gradXi = (gradXi - unitXi.dot(gradXi) * unitXi).eval() * invNormXi; // 没推出来
 
+            // 平方范数约束
             const double sqrNormViolation = sqrNormXi - 1.0;
             if (sqrNormViolation > 0.0)
             {
@@ -201,7 +203,7 @@ namespace gcopter
                                      const PolyhedraV &vPolys,
                                      EIGENVEC &xi)
         {
-            // optimize ?
+            // 这里需要需要对xi进行合适的初始化
             const int sizeP = P.cols();
 
             double minSqrD;
@@ -211,7 +213,7 @@ namespace gcopter
             tiny_nls_params.g_epsilon = FLT_EPSILON;
             tiny_nls_params.max_iterations = 128;
 
-            Eigen::Matrix3Xd ovPoly;    // the poly concludes v-ploy and origin
+            Eigen::Matrix3Xd ovPoly;    // 包含多面体顶点和参考路径点
             for (int i = 0, j = 0, k, l; i < sizeP; i++, j += k)
             {
                 l = vIdx(i);    // v-ploy idx
@@ -223,7 +225,8 @@ namespace gcopter
                 ovPoly.rightCols(k) = vPolys[l];
                 // 
                 Eigen::VectorXd x(k);
-                x.setConstant(sqrt(1.0 / k));   // why is sqrt() ?
+                x.setConstant(sqrt(1.0 / k));   // 开根号是保证平方后是正数
+                // 小规模非线性最小二乘优化
                 lbfgs::lbfgs_optimize(x,
                                       minSqrD,
                                       &GCOPTER_PolytopeSFC::costTinyNLS,
@@ -245,6 +248,7 @@ namespace gcopter
                                          const Eigen::Matrix3Xd &gradP,
                                          EIGENVEC &gradXi)
         {
+            // 求对Xi的梯度
             const int sizeP = vIdx.size();
             gradXi.resize(xi.size());
 
@@ -520,6 +524,7 @@ namespace gcopter
                                           const Eigen::VectorXd &xi,
                                           Eigen::VectorXd &gradXi)
         {
+            // 距离对中间点系数的导数
             void **dataPtrs = (void **)ptr;
             const double &dEps = *((const double *)(dataPtrs[0]));
             const Eigen::Vector3d &ini = *((const Eigen::Vector3d *)(dataPtrs[1]));
@@ -535,12 +540,14 @@ namespace gcopter
             double smoothedDistance;
             for (int i = 0, j = 0, k = 0; i <= overlaps; i++, j += k)
             {
+                // 遍历路径段
+                // a为前一个点，b为后一个点
                 a = i == 0 ? ini : b;
                 if (i < overlaps)
                 {
                     k = vPolys[2 * i + 1].cols();
                     Eigen::Map<const Eigen::VectorXd> q(xi.data() + j, k);
-                    r = q.normalized().head(k - 1);
+                    r = q.normalized().head(k - 1); // 其实取头尾无所谓，系数顺序是任意的
                     b = vPolys[2 * i + 1].rightCols(k - 1) * r.cwiseProduct(r) +
                         vPolys[2 * i + 1].col(0);
                 }
@@ -549,17 +556,18 @@ namespace gcopter
                     b = fin;
                 }
 
-                d = b - a;
+                d = b - a; // 两点之差的二范数为距离
                 smoothedDistance = sqrt(d.squaredNorm() + dEps);
                 cost += smoothedDistance;
-
+                // 这里除以smoothedDistance是为了避免距离对梯度的影响
+                // 实际上gradP.col(i)应该还有个x2操作，被忽略掉了
                 if (i < overlaps)
                 {
                     gradP.col(i) += d / smoothedDistance;
                 }
                 if (i > 0)
                 {
-                    gradP.col(i - 1) -= d / smoothedDistance;
+                    gradP.col(i - 1) -= d / smoothedDistance; // 取负号是因为d =  b - a
                 }
             }
 
@@ -567,19 +575,21 @@ namespace gcopter
             double sqrNormQ, invNormQ, sqrNormViolation, c, dc;
             for (int i = 0, j = 0, k; i < overlaps; i++, j += k)
             {
-                k = vPolys[2 * i + 1].cols();
-                Eigen::Map<const Eigen::VectorXd> q(xi.data() + j, k);
-                Eigen::Map<Eigen::VectorXd> gradQ(gradXi.data() + j, k);
-                sqrNormQ = q.squaredNorm();
-                invNormQ = 1.0 / sqrt(sqrNormQ);
-                unitQ = q * invNormQ;
+                k = vPolys[2 * i + 1].cols();   // 凸多面体顶点数
+                Eigen::Map<const Eigen::VectorXd> q(xi.data() + j, k);  // 系数
+                Eigen::Map<Eigen::VectorXd> gradQ(gradXi.data() + j, k);    // 系数的梯度
+                sqrNormQ = q.squaredNorm(); // q的平方范数
+                invNormQ = 1.0 / sqrt(sqrNormQ);    // q的倒范数
+                unitQ = q * invNormQ;   // q的归一化
                 gradQ.head(k - 1) = (vPolys[2 * i + 1].rightCols(k - 1).transpose() * gradP.col(i)).array() *
                                     unitQ.head(k - 1).array() * 2.0;
                 gradQ(k - 1) = 0.0;
-                gradQ = (gradQ - unitQ * unitQ.dot(gradQ)).eval() * invNormQ;
+                gradQ = (gradQ - unitQ * unitQ.dot(gradQ)).eval() * invNormQ;   // 这里公式推不出来
 
+                // 这里使用的代价函数为 sqrNormViolation ^ 3
+                // 使用二次方好像也没有问题？
                 sqrNormViolation = sqrNormQ - 1.0;
-                if (sqrNormViolation > 0.0)
+                if (sqrNormViolation > 0.0) // 仅仅对超过1时进行约束？
                 {
                     c = sqrNormViolation * sqrNormViolation;
                     dc = 3.0 * c;
@@ -598,20 +608,22 @@ namespace gcopter
                                            const double &smoothD,   // 
                                            Eigen::Matrix3Xd &path)  // target path
         {
-            // 
+            // 根据凸面体V-表示获取最短路径
 
-            // so half of the elements of vPolys are repeated?
-            const int overlaps = vPolys.size() / 2;
-            Eigen::VectorXi vSizes(overlaps);   
-            // get single v-poly size
+            const int overlaps = vPolys.size() / 2; // vPolys的维度是奇数，对半后就是中间点的数目
+            Eigen::VectorXi vSizes(overlaps);       // 保存的是中间点的多面体的顶点数目
             for (int i = 0; i < overlaps; i++)
             {
                 vSizes(i) = vPolys[2 * i + 1].cols();
             }
-            // set element of xi the 1/n
-            Eigen::VectorXd xi(vSizes.sum());
+            // 我们需要让中间点有一个较好的初值
+            // 因此用优化的方式来获取最短路径
+            // 对应中间点即为目标中间点初值
+            // 优化目标是多面体凸组合的系数
+            Eigen::VectorXd xi(vSizes.sum());   // 多面体凸组合系数
             for (int i = 0, j = 0; i < overlaps; i++)
             {
+                // 初始系数为多面凸顶点数目的倒数的根号？
                 xi.segment(j, vSizes(i)).setConstant(sqrt(1.0 / vSizes(i)));
                 j += vSizes(i);
             }
@@ -626,10 +638,6 @@ namespace gcopter
             shortest_path_params.past = 3;
             shortest_path_params.delta = 1.0e-3;
             shortest_path_params.g_epsilon = 1.0e-5;
-            // lbfgs optimize
-            // Note: the author here turn the shortest path problem 
-            // into a numerical optimization problem
-            // 
             lbfgs::lbfgs_optimize(xi,
                                   minDistance,
                                   &GCOPTER_PolytopeSFC::costDistance,
@@ -638,6 +646,7 @@ namespace gcopter
                                   dataPtrs,
                                   shortest_path_params);
             // 
+            // 还原出完整路径
             path.resize(3, overlaps + 2); // +2 is the start and goal
             path.leftCols<1>() = ini;
             path.rightCols<1>() = fin;
@@ -646,10 +655,10 @@ namespace gcopter
             {
                 k = vPolys[2 * i + 1].cols();
                 Eigen::Map<const Eigen::VectorXd> q(xi.data() + j, k);
-                r = q.normalized().head(k - 1); // why ignore the last element?
-                // r.cwiseProduct(r) here is element-wise squared.
+                r = q.normalized().head(k - 1); // 为什么是忽略最后一个元素？
+                // r.cwiseProduct(r) 是为了保证正数
                 path.col(i + 1) = vPolys[2 * i + 1].rightCols(k - 1) * r.cwiseProduct(r) +
-                                  vPolys[2 * i + 1].col(0); // why ?
+                                  vPolys[2 * i + 1].col(0);
             }
 
             return;
@@ -658,22 +667,28 @@ namespace gcopter
         static inline bool processCorridor(const PolyhedraH &hPs,
                                            PolyhedraV &vPs)
         {
-            // get V-poly
+            // 获得凸多面体的V表示
+            // 假设hPs的维度是N，则vPs的维度为(N - 1)*2 + 1
+            // V-表示凸多面体按单个点/两个点交替排列：
+            
             const int sizeCorridor = hPs.size() - 1;
 
             vPs.clear();
-            vPs.reserve(2 * sizeCorridor + 1);
+            vPs.reserve(2 * sizeCorridor + 1);  
 
             int nv;
-            PolyhedronH curIH;
+            PolyhedronH curIH;  // 
             PolyhedronV curIV, curIOB;
             for (int i = 0; i < sizeCorridor; i++)
             {
+                // 将H表示转变为V表示
                 if (!geo_utils::enumerateVs(hPs[i], curIV))
                 {
                     return false;
                 }
-                nv = curIV.cols();
+                nv = curIV.cols();  // V表示的点数目
+                // 用点云表示法表示凸多面体
+                // 取第一个点作为参考点，其他点都是取偏移值
                 curIOB.resize(3, nv);
                 curIOB.col(0) = curIV.col(0);
                 curIOB.rightCols(nv - 1) = curIV.rightCols(nv - 1).colwise() - curIV.col(0);
@@ -686,6 +701,7 @@ namespace gcopter
                 {
                     return false;
                 }
+                // 用点云表示法表示凸多面体
                 nv = curIV.cols();
                 curIOB.resize(3, nv);
                 curIOB.col(0) = curIV.col(0);
@@ -713,6 +729,7 @@ namespace gcopter
                                       Eigen::VectorXd &timeAlloc)   // T
         {
             // Initialize P and T
+            // 均匀采样
             const int sizeM = intervalNs.size();     // number of pieces
             const int sizeN = intervalNs.sum(); // number of subpieces
             innerPoints.resize(3, sizeN - 1);   // resize? it is not reasonable.
@@ -758,14 +775,14 @@ namespace gcopter
             tailPVA = terminalPVA;
 
             hPolytopes = safeCorridor;
-            // normalize H-poly, make the fourth element become distance between origin and space
+            // 对多面体进行归一化处理，使得最后一个元素为距离
             for (size_t i = 0; i < hPolytopes.size(); i++)
             {
                 const Eigen::ArrayXd norms =
                     hPolytopes[i].leftCols<3>().rowwise().norm();
                 hPolytopes[i].array().colwise() /= norms;
             }
-            // get v-poly
+            // vPolytopes维度为2(N-1) + 1
             if (!processCorridor(hPolytopes, vPolytopes))
             {
                 return false;
@@ -779,11 +796,11 @@ namespace gcopter
             physicalPm = physicalParams;
             allocSpeed = magnitudeBd(0) * 3.0;
 
-            // ?
+            // 获取最短路径
             getShortestPath(headPVA.col(0), tailPVA.col(0),
                             vPolytopes, smoothEps, shortPath);
             const Eigen::Matrix3Xd deltas = shortPath.rightCols(polyN) - shortPath.leftCols(polyN);  //  next_point - last_point
-            // determine the subpieces according to the lengthPerPiece
+            // 确定路径切片数量
             pieceIdx = (deltas.colwise().norm() / lengthPerPiece).cast<int>().transpose(); 
             pieceIdx.array() += 1;  // every pieces at least consist of one subpieces
             pieceN = pieceIdx.sum();    // the number of all subpieces
@@ -792,9 +809,10 @@ namespace gcopter
             spatialDim = 0; // the dimention of P
             vPolyIdx.resize(pieceN - 1);
             hPolyIdx.resize(pieceN);
+            // 起止点不变，我们只需要处理中间点
             for (int i = 0, j = 0, k; i < polyN; i++)
             {
-                k = pieceIdx(i);
+                k = pieceIdx(i);    // 子路径切片数量
                 for (int l = 0; l < k; l++, j++)
                 {
                     if (l < k - 1)
@@ -802,7 +820,7 @@ namespace gcopter
                         vPolyIdx(j) = 2 * i;    // the v-poly idx of Pi 
                         spatialDim += vPolytopes[2 * i].cols();
                     }
-                    else if (i < polyN - 1)
+                    else if (i < polyN - 1) // 子路径切片的最后一个点属于并集
                     {
                         vPolyIdx(j) = 2 * i + 1;
                         spatialDim += vPolytopes[2 * i + 1].cols();
@@ -834,11 +852,11 @@ namespace gcopter
             Eigen::Map<Eigen::VectorXd> tau(x.data(), temporalDim); // agent of T
             Eigen::Map<Eigen::VectorXd> xi(x.data() + temporalDim, spatialDim); // agent of P
             
-            // points - p vector
-            // times - T vector
+            // 初始化P和T
             setInitial(shortPath, allocSpeed, pieceIdx, points, times);
-            backwardT(times, tau);  // get tau ?
-            backwardP(points, vPolyIdx, vPolytopes, xi);    // get xi ?
+            // 初始化P和T的代理变量
+            backwardT(times, tau);
+            backwardP(points, vPolyIdx, vPolytopes, xi); 
 
             double minCostFunctional;
             lbfgs_params.mem_size = 256;

@@ -171,12 +171,12 @@ public:
                                  3.0,
                                  hPolys);
 
-            // shortcut region
+            // 精简飞行走廊
             sfc_gen::shortCut(hPolys);
 
             if (route.size() > 1)
             {
-                // visualize region
+                // 可视化飞行走廊
                 visualizer.visualizePolytope(hPolys);
 
                 Eigen::Matrix3d iniState;

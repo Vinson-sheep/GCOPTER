@@ -22,6 +22,7 @@
     SOFTWARE.
 */
 
+// FIRI 快速区域迭代膨胀 （Fast Iterative Region Inflation）
 /* This is an old version of FIRI for temporary usage here. */
 
 #ifndef FIRI_HPP
