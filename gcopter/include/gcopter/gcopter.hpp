@@ -304,10 +304,11 @@ namespace gcopter
         }
 
         static inline bool smoothedL1(const double &x,
-                                      const double &mu,
-                                      double &f,
-                                      double &df)
+                                      const double &mu, // 磨光因子
+                                      double &f,    // 平滑输出
+                                      double &df)   // 平滑输出f对x的梯度
         {
+            // C2光滑化函数
             if (x < 0.0)
             {
                 return false;
@@ -338,7 +339,7 @@ namespace gcopter
                                                    const Eigen::VectorXi &hIdx,
                                                    const PolyhedraH &hPolys,
                                                    const double &smoothFactor,
-                                                   const int &integralResolution,
+                                                   const int &integralResolution,   // 积分分辨率
                                                    const Eigen::VectorXd &magnitudeBounds,
                                                    const Eigen::VectorXd &penaltyWeights,
                                                    flatness::FlatnessMap &flatMap,
@@ -381,66 +382,72 @@ namespace gcopter
 
             const int pieceNum = T.size();
             const double integralFrac = 1.0 / integralResolution;
+            // 遍历所有路径段
             for (int i = 0; i < pieceNum; i++)
             {
-                const Eigen::Matrix<double, 6, 3> &c = coeffs.block<6, 3>(i * 6, 0);
-                step = T(i) * integralFrac;
+                const Eigen::Matrix<double, 6, 3> &c = coeffs.block<6, 3>(i * 6, 0);    // 对应系数轨迹
+                step = T(i) * integralFrac; // 时间步长
                 for (int j = 0; j <= integralResolution; j++)
                 {
+                    // 计算时间的n次方
                     s1 = j * step;
                     s2 = s1 * s1;
                     s3 = s2 * s1;
                     s4 = s2 * s2;
                     s5 = s4 * s1;
+                    // 计算基
                     beta0(0) = 1.0, beta0(1) = s1, beta0(2) = s2, beta0(3) = s3, beta0(4) = s4, beta0(5) = s5;
                     beta1(0) = 0.0, beta1(1) = 1.0, beta1(2) = 2.0 * s1, beta1(3) = 3.0 * s2, beta1(4) = 4.0 * s3, beta1(5) = 5.0 * s4;
                     beta2(0) = 0.0, beta2(1) = 0.0, beta2(2) = 2.0, beta2(3) = 6.0 * s1, beta2(4) = 12.0 * s2, beta2(5) = 20.0 * s3;
                     beta3(0) = 0.0, beta3(1) = 0.0, beta3(2) = 0.0, beta3(3) = 6.0, beta3(4) = 24.0 * s1, beta3(5) = 60.0 * s2;
                     beta4(0) = 0.0, beta4(1) = 0.0, beta4(2) = 0.0, beta4(3) = 0.0, beta4(4) = 24.0, beta4(5) = 120.0 * s1;
+                    // 计算约束指标
                     pos = c.transpose() * beta0;
                     vel = c.transpose() * beta1;
                     acc = c.transpose() * beta2;
                     jer = c.transpose() * beta3;
                     sna = c.transpose() * beta4;
-
+                    // 计算推力，姿态，？？
                     flatMap.forward(vel, acc, jer, 0.0, 0.0, thr, quat, omg);
-
+                    // 计算误差 （加速度？？）
                     violaVel = vel.squaredNorm() - velSqrMax;
                     violaOmg = omg.squaredNorm() - omgSqrMax;
                     cos_theta = 1.0 - 2.0 * (quat(1) * quat(1) + quat(2) * quat(2));
-                    violaTheta = acos(cos_theta) - thetaMax;
-                    violaThrust = (thr - thrustMean) * (thr - thrustMean) - thrustSqrRadi;
-
+                    violaTheta = acos(cos_theta) - thetaMax;    // 姿态角误差
+                    violaThrust = (thr - thrustMean) * (thr - thrustMean) - thrustSqrRadi;  // 推力误差
+                    // 初始化为0
                     gradThr = 0.0;
                     gradQuat.setZero();
                     gradPos.setZero(), gradVel.setZero(), gradOmg.setZero();
-                    pena = 0.0;
+                    pena = 0.0; // 惩罚项计数
 
-                    L = hIdx(i);
-                    K = hPolys[L].rows();
+                    L = hIdx(i);    // 当前多面体索引
+                    K = hPolys[L].rows();   // 多面体面数
+                    // 位置约束 （对不在飞行走廊的位置点进行约束）
+                    // 为什么还要约束？不是使用了代理变量了吗？
                     for (int k = 0; k < K; k++)
                     {
                         outerNormal = hPolys[L].block<1, 3>(k, 0);
-                        violaPos = outerNormal.dot(pos) + hPolys[L](k, 3);
+                        violaPos = outerNormal.dot(pos) + hPolys[L](k, 3);  // 只有为正数才违反约束
                         if (smoothedL1(violaPos, smoothFactor, violaPosPena, violaPosPenaD))
                         {
-                            gradPos += weightPos * violaPosPenaD * outerNormal;
+                            gradPos += weightPos * violaPosPenaD * outerNormal; // 对位置的梯度
                             pena += weightPos * violaPosPena;
                         }
                     }
-
+                    // 速度约束
                     if (smoothedL1(violaVel, smoothFactor, violaVelPena, violaVelPenaD))
                     {
-                        gradVel += weightVel * violaVelPenaD * 2.0 * vel;
+                        gradVel += weightVel * violaVelPenaD * 2.0 * vel;   // 对速度的梯度
                         pena += weightVel * violaVelPena;
                     }
-
+                    // ？？
                     if (smoothedL1(violaOmg, smoothFactor, violaOmgPena, violaOmgPenaD))
                     {
                         gradOmg += weightOmg * violaOmgPenaD * 2.0 * omg;
                         pena += weightOmg * violaOmgPena;
                     }
-
+                    // 倾角约束
                     if (smoothedL1(violaTheta, smoothFactor, violaThetaPena, violaThetaPenaD))
                     {
                         gradQuat += weightTheta * violaThetaPenaD /
@@ -448,17 +455,17 @@ namespace gcopter
                                     Eigen::Vector4d(0.0, quat(1), quat(2), 0.0);
                         pena += weightTheta * violaThetaPena;
                     }
-
+                    //  推力约束
                     if (smoothedL1(violaThrust, smoothFactor, violaThrustPena, violaThrustPenaD))
                     {
                         gradThr += weightThrust * violaThrustPenaD * 2.0 * (thr - thrustMean);
                         pena += weightThrust * violaThrustPena;
                     }
-
+                    // 获取位置/速度/加速度/加加速度的总梯度
                     flatMap.backward(gradPos, gradVel, gradThr, gradQuat, gradOmg,
                                      totalGradPos, totalGradVel, totalGradAcc, totalGradJer,
                                      totalGradPsi, totalGradPsiD);
-
+                    // 获得惩罚对C和T的梯度
                     node = (j == 0 || j == integralResolution) ? 0.5 : 1.0;
                     alpha = j * integralFrac;
                     gradC.block<6, 3>(i * 6, 0) += (beta0 * totalGradPos.transpose() +
@@ -491,15 +498,15 @@ namespace gcopter
             Eigen::Map<const Eigen::VectorXd> xi(x.data() + dimTau, dimXi);
             Eigen::Map<Eigen::VectorXd> gradTau(g.data(), dimTau);
             Eigen::Map<Eigen::VectorXd> gradXi(g.data() + dimTau, dimXi);
-
++
             forwardT(tau, obj.times);
             forwardP(xi, obj.vPolyIdx, obj.vPolytopes, obj.points);
 
             double cost;
             obj.minco.setParameters(obj.points, obj.times);
             obj.minco.getEnergy(cost);
-            obj.minco.getEnergyPartialGradByCoeffs(obj.partialGradByCoeffs);
-            obj.minco.getEnergyPartialGradByTimes(obj.partialGradByTimes);
+            obj.minco.getEnergyPartialGradByCoeffs(obj.partialGradByCoeffs);    // 能量函数对系数的偏导数
+            obj.minco.getEnergyPartialGradByTimes(obj.partialGradByTimes);  // 能量函数对时间序列的偏导数
 
             attachPenaltyFunctional(obj.times, obj.minco.getCoeffs(),
                                     obj.hPolyIdx, obj.hPolytopes,
