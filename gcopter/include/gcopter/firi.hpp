@@ -22,7 +22,6 @@
     SOFTWARE.
 */
 
-// FIRI 快速区域迭代膨胀 （Fast Iterative Region Inflation）
 /* This is an old version of FIRI for temporary usage here. */
 
 #ifndef FIRI_HPP
@@ -42,7 +41,7 @@
 
 namespace firi
 {
-
+    // 三维矩阵的Cholesky分解
     inline void chol3d(const Eigen::Matrix3d &A,
                        Eigen::Matrix3d &L)
     {
@@ -57,7 +56,7 @@ namespace firi
         L(2, 2) = sqrt(A(2, 2) - L(2, 0) * L(2, 0) - L(2, 1) * L(2, 1));
         return;
     }
-
+    // 这个函数与其他模块的L1是一致的
     inline bool smoothedL1(const double &mu,
                            const double &x,
                            double &f,
@@ -94,12 +93,12 @@ namespace firi
         const double *pA = pPenaltyWt + 1;
 
         const int M = *pM;
-        const double smoothEps = *pSmoothEps;
-        const double penaltyWt = *pPenaltyWt;
-        Eigen::Map<const Eigen::MatrixX3d> A(pA, M, 3);
-        Eigen::Map<const Eigen::Vector3d> p(x.data());
-        Eigen::Map<const Eigen::Vector3d> rtd(x.data() + 3);
-        Eigen::Map<const Eigen::Vector3d> cde(x.data() + 6);
+        const double smoothEps = *pSmoothEps;   // 磨光因子
+        const double penaltyWt = *pPenaltyWt;   // 惩罚权重
+        Eigen::Map<const Eigen::MatrixX3d> A(pA, M, 3);         // 对应论文中的A_p
+        Eigen::Map<const Eigen::Vector3d> p(x.data());          // 椭球中心
+        Eigen::Map<const Eigen::Vector3d> rtd(x.data() + 3);    // L的对角元素
+        Eigen::Map<const Eigen::Vector3d> cde(x.data() + 6);    // L的剩余元素
         Eigen::Map<Eigen::Vector3d> gdp(grad.data());
         Eigen::Map<Eigen::Vector3d> gdrtd(grad.data() + 3);
         Eigen::Map<Eigen::Vector3d> gdcde(grad.data() + 6);
@@ -109,6 +108,7 @@ namespace firi
         gdrtd.setZero();
         gdcde.setZero();
 
+        // 还原L
         Eigen::Matrix3d L;
         L(0, 0) = rtd(0) * rtd(0) + DBL_EPSILON;
         L(0, 1) = 0.0;
@@ -120,7 +120,7 @@ namespace firi
         L(2, 1) = cde(1);
         L(2, 2) = rtd(2) * rtd(2) + DBL_EPSILON;
 
-        const Eigen::MatrixX3d AL = A * L;
+        const Eigen::MatrixX3d AL = A * L;  // A_p * L
         const Eigen::VectorXd normAL = AL.rowwise().norm();
         const Eigen::Matrix3Xd adjNormAL = (AL.array().colwise() / normAL.array()).transpose();
         const Eigen::VectorXd consViola = (normAL + A * p).array() - 1.0;
@@ -144,7 +144,7 @@ namespace firi
         gdp *= penaltyWt;
         gdrtd *= penaltyWt;
         gdcde *= penaltyWt;
-
+        // 此处代价函数为-log(abc），椭球体积=abc，此处的log操作是为了让abc接耦
         cost -= log(L(0, 0)) + log(L(1, 1)) + log(L(2, 2));
         gdrtd(0) -= 1.0 / L(0, 0);
         gdrtd(1) -= 1.0 / L(1, 1);
@@ -159,21 +159,21 @@ namespace firi
 
     // Each row of hPoly is defined by h0, h1, h2, h3 as
     // h0*x + h1*y + h2*z + h3 <= 0
-    // R, p, r are ALWAYS taken as the initial guess
+    // R, p, r are ALWAYS taken as the initial guess (传入的R p r会作为初始估计)
     // R is also assumed to be a rotation matrix
     inline bool maxVolInsEllipsoid(const Eigen::MatrixX4d &hPoly,
-                                   Eigen::Matrix3d &R,
-                                   Eigen::Vector3d &p,
-                                   Eigen::Vector3d &r)
+                                   Eigen::Matrix3d &R,  // A_{eps}
+                                   Eigen::Vector3d &p,  // 椭球中心，对应b_{eps}
+                                   Eigen::Vector3d &r)  // D_{eps}的对角元素
     {
         // Find the deepest interior point
-        const int M = hPoly.rows();
-        Eigen::MatrixX4d Alp(M, 4);
+        const int M = hPoly.rows(); // 多面体面数
+        Eigen::MatrixX4d Alp(M, 4); // 归一化的
         Eigen::VectorXd blp(M);
         Eigen::Vector4d clp, xlp;
         const Eigen::ArrayXd hNorm = hPoly.leftCols<3>().rowwise().norm();
         Alp.leftCols<3>() = hPoly.leftCols<3>().array().colwise() / hNorm;
-        Alp.rightCols<1>().setConstant(1.0);
+        Alp.rightCols<1>().setConstant(1.0);    // 貌似没有什么用
         blp = -hPoly.rightCols<1>().array() / hNorm;
         clp.setZero();
         clp(3) = -1.0;
@@ -182,24 +182,26 @@ namespace firi
         {
             return false;
         }
-        const Eigen::Vector3d interior = xlp.head<3>();
+        const Eigen::Vector3d interior = xlp.head<3>(); // 最深内点
 
         // Prepare the data for MVIE optimization
-        uint8_t *optData = new uint8_t[sizeof(int) + (2 + 3 * M) * sizeof(double)];
-        int *pM = (int *)optData;
-        double *pSmoothEps = (double *)(pM + 1);
-        double *pPenaltyWt = pSmoothEps + 1;
-        double *pA = pPenaltyWt + 1;
+        uint8_t *optData = new uint8_t[sizeof(int) + (2 + 3 * M) * sizeof(double)]; // 为cost函数传递参数
+        int *pM = (int *)optData;                   // 多面体面数
+        double *pSmoothEps = (double *)(pM + 1);    // 磨光因子
+        double *pPenaltyWt = pSmoothEps + 1;        // 额外惩罚的权重
+        double *pA = pPenaltyWt + 1;                // 多面体数据
 
         *pM = M;
         Eigen::Map<Eigen::MatrixX3d> A(pA, M, 3);
+        // 此处修正超平面对内点的偏移为1
+        // 这是因为在优化过程中是以内点作为原点，在坐标下的b就是1.0
         A = Alp.leftCols<3>().array().colwise() /
             (blp - Alp.leftCols<3>() * interior).array();
 
         Eigen::VectorXd x(9);
-        const Eigen::Matrix3d Q = R * (r.cwiseProduct(r)).asDiagonal() * R.transpose();
-        Eigen::Matrix3d L;
-        chol3d(Q, L);
+        const Eigen::Matrix3d Q = R * (r.cwiseProduct(r)).asDiagonal() * R.transpose(); // 对应A D^2 A^T
+        Eigen::Matrix3d L;  // Cholesky分解中的下三角矩阵L
+        chol3d(Q, L);       // 3维Cholesky分解（唯一）
 
         x.head<3>() = p - interior;
         x(3) = sqrt(L(0, 0));
@@ -219,6 +221,7 @@ namespace firi
         *pSmoothEps = 1.0e-2;
         *pPenaltyWt = 1.0e+3;
 
+        // 此处使用罚函数+LBFG求解，而不是标准的二阶锥优化
         int ret = lbfgs::lbfgs_optimize(x,
                                         minCost,
                                         &costMVIE,
@@ -230,8 +233,9 @@ namespace firi
         if (ret < 0)
         {
             printf("FIRI WARNING: %s\n", lbfgs::lbfgs_strerror(ret));
+            return false;
         }
-
+        // 还原出椭球心和L矩阵
         p = x.head<3>() + interior;
         L(0, 0) = x(3) * x(3);
         L(0, 1) = 0.0;
@@ -242,11 +246,13 @@ namespace firi
         L(2, 0) = x(8);
         L(2, 1) = x(7);
         L(2, 2) = x(5) * x(5);
+        // SVD分解：将L分解为USV^T，注意到
         Eigen::JacobiSVD<Eigen::Matrix3d, Eigen::FullPivHouseholderQRPreconditioner> svd(L, Eigen::ComputeFullU);
         const Eigen::Matrix3d U = svd.matrixU();
         const Eigen::Vector3d S = svd.singularValues();
-        if (U.determinant() < 0.0)
+        if (U.determinant() < 0.0)  // 如果U的行列式为小于0
         {
+            // 交换两列
             R.col(0) = U.col(1);
             R.col(1) = U.col(0);
             R.col(2) = U.col(2);
@@ -265,77 +271,69 @@ namespace firi
         return ret >= 0;
     }
 
-    inline bool firi(const Eigen::MatrixX4d &bd, // boundary
-                     const Eigen::Matrix3Xd &pc,    // checkout points
-                     const Eigen::Vector3d &a,  // start
-                     const Eigen::Vector3d &b,  // goal
-                     Eigen::MatrixX4d &hPoly,   // target H-ploygon
-                     const int iterations = 4,
+    inline bool firi(const Eigen::MatrixX4d &bd,    // H-poly边界
+                     const Eigen::Matrix3Xd &pc,    // 碰撞点
+                     const Eigen::Vector3d &a,      // 第一个包含点
+                     const Eigen::Vector3d &b,      // 第二个包含点
+                     Eigen::MatrixX4d &hPoly,       // H-poly
+                     const int iterations = 4,      // 最大迭代次数
                      const double epsilon = 1.0e-6)
     {
         const Eigen::Vector4d ah(a(0), a(1), a(2), 1.0);
         const Eigen::Vector4d bh(b(0), b(1), b(2), 1.0);
-
-        // if start and goal is not in the boundary, return false
+        // 如果ab不在边界内，则返回false
         if ((bd * ah).maxCoeff() > 0.0 ||
             (bd * bh).maxCoeff() > 0.0)
         {
             return false;
         }
-        // 
-        const int M = bd.rows(); // 6
-        const int N = pc.cols();    // checkpoints number
 
-        // initialize: not rotation, center in (a+b)/2, is a sphere.
-        Eigen::Matrix3d R = Eigen::Matrix3d::Identity();    // A
-        Eigen::Vector3d p = 0.5 * (a + b);  // b
-        Eigen::Vector3d r = Eigen::Vector3d::Ones();    // D
-        Eigen::MatrixX4d forwardH(M + N, 4);    // ??
-        int nH = 0; // ??
+        const int M = bd.rows();    // 边界面数
+        const int N = pc.cols();    // 障碍点数
+
+        Eigen::Matrix3d R = Eigen::Matrix3d::Identity();    // 初始旋转矩阵为I
+        Eigen::Vector3d p = 0.5 * (a + b);                  // 初始椭球中心为ab的中点
+        Eigen::Vector3d r = Eigen::Vector3d::Ones();        // 初始椭球三轴长度相等
+        Eigen::MatrixX4d forwardH(M + N, 4);                // 此处取M+N是取面数最大值
+        int nH = 0;
 
         for (int loop = 0; loop < iterations; ++loop)
         {
-            const Eigen::Matrix3d forward = r.cwiseInverse().asDiagonal() * R.transpose(); // D^-1 * A^T
-            const Eigen::Matrix3d backward = R * r.asDiagonal();    // A * D
-            const Eigen::MatrixX3d forwardB = bd.leftCols<3>() * backward;  // boundary
-            const Eigen::VectorXd forwardD = bd.rightCols<1>() + bd.leftCols<3>() * p;
-            const Eigen::Matrix3Xd forwardPC = forward * (pc.colwise() - p);    //  forward valid checkpoints 
-            const Eigen::Vector3d fwd_a = forward * (a - p);    // forward point a
-            const Eigen::Vector3d fwd_b = forward * (b - p);    // forward point b
+            const Eigen::Matrix3d forward = r.cwiseInverse().asDiagonal() * R.transpose();  // 正向转换前缀
+            const Eigen::Matrix3d backward = R * r.asDiagonal();                            // 逆向转换前缀
+            const Eigen::MatrixX3d forwardB = bd.leftCols<3>() * backward;      // ？
+            const Eigen::VectorXd forwardD = bd.rightCols<1>() + bd.leftCols<3>() * p;  // ？
+            const Eigen::Matrix3Xd forwardPC = forward * (pc.colwise() - p);    // 对障碍物点进行转换
+            // 行7
+            const Eigen::Vector3d fwd_a = forward * (a - p);    // 对a点进行转换
+            const Eigen::Vector3d fwd_b = forward * (b - p);    // 对b点进行转换
 
-            const Eigen::VectorXd distDs = forwardD.cwiseAbs().cwiseQuotient(forwardB.rowwise().norm()); // ??
-            Eigen::MatrixX4d tangents(N, 4);    // the first three element is the normalized forward checkpoints, the fourth is the -distance;
-            Eigen::VectorXd distRs(N); // distance between forward checkpoints and origin
-
-            // Calculate the maximum expansion ratio
+            const Eigen::VectorXd distDs = forwardD.cwiseAbs().cwiseQuotient(forwardB.rowwise().norm());
+            Eigen::MatrixX4d tangents(N, 4);
+            Eigen::VectorXd distRs(N);
+            // 行9-13
             for (int i = 0; i < N; i++)
             {
-                // update tangents & distRs
-                distRs(i) = forwardPC.col(i).norm();    // squaredNorm?
-                tangents(i, 3) = -distRs(i);
+                distRs(i) = forwardPC.col(i).norm();    // 障碍物点到原点的距离
+                tangents(i, 3) = -distRs(i);            // 
                 tangents.block<1, 3>(i, 0) = forwardPC.col(i).transpose() / distRs(i);
-                // if forward a point is not included in half space
-                // adjust normalized forward checkpoints
+                // 如果a点不在超平面内
                 if (tangents.block<1, 3>(i, 0).dot(fwd_a) + tangents(i, 3) > epsilon)
                 {
-                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_a; // distance  between a point and checkpoints
-                    tangents.block<1, 3>(i, 0) = fwd_a - (delta.dot(fwd_a) / delta.squaredNorm()) * delta; 
+                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_a;
+                    tangents.block<1, 3>(i, 0) = fwd_a - (delta.dot(fwd_a) / delta.squaredNorm()) * delta;  // 进行修正
                     distRs(i) = tangents.block<1, 3>(i, 0).norm();
                     tangents(i, 3) = -distRs(i);
                     tangents.block<1, 3>(i, 0) /= distRs(i);
                 }
-                // if forward b point is not included in half space
-                // adjust normalized forward checkpoints
                 if (tangents.block<1, 3>(i, 0).dot(fwd_b) + tangents(i, 3) > epsilon)
                 {
-                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_b; 
+                    const Eigen::Vector3d delta = forwardPC.col(i) - fwd_b;
                     tangents.block<1, 3>(i, 0) = fwd_b - (delta.dot(fwd_b) / delta.squaredNorm()) * delta;
                     distRs(i) = tangents.block<1, 3>(i, 0).norm();
                     tangents(i, 3) = -distRs(i);
                     tangents.block<1, 3>(i, 0) /= distRs(i);
                 }
-                // if forward a point is not still included in half space
-                // ??
                 if (tangents.block<1, 3>(i, 0).dot(fwd_a) + tangents(i, 3) > epsilon)
                 {
                     tangents.block<1, 3>(i, 0) = (fwd_a - forwardPC.col(i)).cross(fwd_b - forwardPC.col(i)).normalized();
@@ -344,8 +342,6 @@ namespace firi
                 }
             }
 
-            // the M boundary is the limitation out of the checkpoints
-            // declare the visited flag of boundaryand checkpoints
             Eigen::Matrix<uint8_t, -1, 1> bdFlags = Eigen::Matrix<uint8_t, -1, 1>::Constant(M, 1);
             Eigen::Matrix<uint8_t, -1, 1> pcFlags = Eigen::Matrix<uint8_t, -1, 1>::Constant(N, 1);
 
@@ -359,17 +355,15 @@ namespace firi
             {
                 minSqrR = distRs.minCoeff(&pcMinId);
             }
-            // Select the tightest half space
+            // M+N为最大迭代次数，i不起作用
             for (int i = 0; !completed && i < (M + N); ++i)
             {
-                // if tightest half space is in boundary
                 if (minSqrD < minSqrR)
                 {
                     forwardH.block<1, 3>(nH, 0) = forwardB.row(bdMinId);
                     forwardH(nH, 3) = forwardD(bdMinId);
                     bdFlags(bdMinId) = 0;
                 }
-                // if tightest half space is in checkpoints
                 else
                 {
                     forwardH.row(nH) = tangents.row(pcMinId);
@@ -380,7 +374,7 @@ namespace firi
                 minSqrD = INFINITY;
                 for (int j = 0; j < M; ++j)
                 {
-                    if (bdFlags(j)) // if boundary is not visited
+                    if (bdFlags(j))
                     {
                         completed = false;
                         if (minSqrD > distDs(j))
@@ -393,14 +387,12 @@ namespace firi
                 minSqrR = INFINITY;
                 for (int j = 0; j < N; ++j)
                 {
-                    if (pcFlags(j)) // if checkpoints is not visited
+                    if (pcFlags(j))
                     {
-                        // if not be included in new half space, filter it.
                         if (forwardH.block<1, 3>(nH, 0).dot(forwardPC.col(j)) + forwardH(nH, 3) > -epsilon)
                         {
                             pcFlags(j) = 0;
                         }
-                        // else, update idx
                         else
                         {
                             completed = false;
@@ -414,7 +406,7 @@ namespace firi
                 }
                 ++nH;
             }
-            // return to polygon of original space
+
             hPoly.resize(nH, 4);
             for (int i = 0; i < nH; ++i)
             {
@@ -427,7 +419,9 @@ namespace firi
                 break;
             }
 
-            maxVolInsEllipsoid(hPoly, R, p, r);
+            if (!maxVolInsEllipsoid(hPoly, R, p, r)) {
+                return false;
+            }
         }
 
         return true;

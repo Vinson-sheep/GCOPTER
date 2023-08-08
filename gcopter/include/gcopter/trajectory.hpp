@@ -34,7 +34,7 @@
 #include <cfloat>
 #include <vector>
 
-template <int D>    // D = order
+template <int D>
 class Piece
 {
 public:
@@ -44,7 +44,7 @@ public:
 
 private:
     double duration;
-    CoefficientMat coeffMat;    // Higher order coefficient first
+    CoefficientMat coeffMat;
 
 public:
     Piece() = default;
@@ -59,7 +59,7 @@ public:
 
     inline int getDegree() const
     {
-        return D;   // order
+        return D;
     }
 
     inline double getDuration() const
@@ -134,7 +134,6 @@ public:
 
     inline CoefficientMat normalizePosCoeffMat() const
     {
-        // normalize t -> [0, 1]
         CoefficientMat nPosCoeffsMat;
         double t = 1.0;
         for (int i = D; i >= 0; i--)
@@ -183,40 +182,33 @@ public:
                                 RootFinder::polySqr(nVelCoeffMat.row(2));
         int N = coeff.size();
         int n = N - 1;
-        // get coeff gradient
         for (int i = 0; i < N; i++)
         {
             coeff(i) *= n;
             n--;
         }
-        // if coefficients of gradient are all zeros.
         if (coeff.head(N - 1).squaredNorm() < DBL_EPSILON)
         {
-            // return the first
             return getVel(0.0).norm();
         }
         else
         {
-            // the output must be positive.
-            // we should make sure that the left and the right output > 0 first.
             double l = -0.0625;
             double r = 1.0625;
             while (fabs(RootFinder::polyVal(coeff.head(N - 1), l)) < DBL_EPSILON)
             {
-                l = 0.5 * l;    // close to 0
+                l = 0.5 * l;
             }
             while (fabs(RootFinder::polyVal(coeff.head(N - 1), r)) < DBL_EPSILON)
             {
-                r = 0.5 * (r + 1.0);    // close to 1
+                r = 0.5 * (r + 1.0);
             }
-            // find pole points
             std::set<double> candidates = RootFinder::solvePolynomial(coeff.head(N - 1), l, r,
                                                                       FLT_EPSILON / duration);
             candidates.insert(0.0);
             candidates.insert(1.0);
             double maxVelRateSqr = -INFINITY;
             double tempNormSqr;
-            // find the max velocity
             for (std::set<double>::const_iterator it = candidates.begin();
                  it != candidates.end();
                  it++)
@@ -283,7 +275,6 @@ public:
     inline bool checkMaxVelRate(const double &maxVelRate) const
     {
         double sqrMaxVelRate = maxVelRate * maxVelRate;
-        // check two-size limitation
         if (getVel(0.0).squaredNorm() >= sqrMaxVelRate ||
             getVel(duration).squaredNorm() >= sqrMaxVelRate)
         {
@@ -291,15 +282,12 @@ public:
         }
         else
         {
-            // find all roots
             VelCoefficientMat nVelCoeffMat = normalizeVelCoeffMat();
-            // P_1(x)^2 + P_2(x)^2 + P_3(x)^2 
             Eigen::VectorXd coeff = RootFinder::polySqr(nVelCoeffMat.row(0)) +
                                     RootFinder::polySqr(nVelCoeffMat.row(1)) +
                                     RootFinder::polySqr(nVelCoeffMat.row(2));
-            // check validation
             double t2 = duration * duration;
-            coeff.tail<1>()(0) -= sqrMaxVelRate * t2;   // *t2 here is for normalization.
+            coeff.tail<1>()(0) -= sqrMaxVelRate * t2;
             return RootFinder::countRoots(coeff, 0.0, 1.0) == 0;
         }
     }

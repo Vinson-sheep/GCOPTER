@@ -51,7 +51,6 @@ namespace sfc_gen
                            const double &timeout,
                            std::vector<Eigen::Vector3d> &p)
     {
-        // 全局路径规划，获得原始参考路径
         auto space(std::make_shared<ompl::base::RealVectorStateSpace>(3));
 
         ompl::base::RealVectorBounds bounds(3);
@@ -125,7 +124,7 @@ namespace sfc_gen
     {
         hpolys.clear();
         const int n = path.size();
-        Eigen::Matrix<double, 6, 4> bd = Eigen::Matrix<double, 6, 4>::Zero();   // boundary
+        Eigen::Matrix<double, 6, 4> bd = Eigen::Matrix<double, 6, 4>::Zero();
         bd(0, 0) = 1.0;
         bd(1, 0) = -1.0;
         bd(2, 1) = 1.0;
@@ -133,14 +132,13 @@ namespace sfc_gen
         bd(4, 2) = 1.0;
         bd(5, 2) = -1.0;
 
-        Eigen::MatrixX4d hp, gap;   // hp: cur polygon, gap: 
-        Eigen::Vector3d a, b = path[0]; // last waypoints, next waypoints
+        Eigen::MatrixX4d hp, gap;
+        Eigen::Vector3d a, b = path[0];
         std::vector<Eigen::Vector3d> valid_pc;
-        std::vector<Eigen::Vector3d> bs;    // modified path
+        std::vector<Eigen::Vector3d> bs;
         valid_pc.reserve(points.size());
-        for (int i = 1; i < n;) // start is not need to calculate
+        for (int i = 1; i < n;)
         {
-            // 限制两点之间的距离
             a = b;
             if ((a - path[i]).norm() > progress)
             {
@@ -151,10 +149,8 @@ namespace sfc_gen
                 b = path[i];
                 i++;
             }
-            // bs中存储真正的路径点 （此处没有返回bs）
             bs.emplace_back(b);
 
-            // 设置a-b之间的搜索边界
             bd(0, 3) = -std::min(std::max(a(0), b(0)) + range, highCorner(0));
             bd(1, 3) = +std::max(std::min(a(0), b(0)) - range, lowCorner(0));
             bd(2, 3) = -std::min(std::max(a(1), b(1)) + range, highCorner(1));
@@ -162,7 +158,6 @@ namespace sfc_gen
             bd(4, 3) = -std::min(std::max(a(2), b(2)) + range, highCorner(2));
             bd(5, 3) = +std::max(std::min(a(2), b(2)) - range, lowCorner(2));
 
-            // 搜索边界内的检查点
             valid_pc.clear();
             for (const Eigen::Vector3d &p : points)
             {
@@ -171,17 +166,12 @@ namespace sfc_gen
                     valid_pc.emplace_back(p);
                 }
             }
-
-            // change valid_pc to matrix
             Eigen::Map<const Eigen::Matrix<double, 3, -1, Eigen::ColMajor>> pc(valid_pc[0].data(), 3, valid_pc.size());
 
-            // 快速区域迭代 （该算法不保证a-b点都被包含）
-            firi::firi(bd, pc, a, b, hp);   // get hp
+            firi::firi(bd, pc, a, b, hp);
 
-            // 如果不是第一个凸多面体
             if (hpolys.size() != 0)
             {
-                // 需要保证前一个点被包含 （但不能保证相邻两个多面体有交集）
                 const Eigen::Vector4d ah(a(0), a(1), a(2), 1.0);
                 if (3 <= ((hp * ah).array() > -eps).cast<int>().sum() +
                              ((hpolys.back() * ah).array() > -eps).cast<int>().sum())
@@ -190,16 +180,17 @@ namespace sfc_gen
                     hpolys.emplace_back(gap);
                 }
             }
-            // 保证顺序关系，需要先预处理A点的多面体，再处理A-B点的多面体
+
             hpolys.emplace_back(hp);
         }
+
+            std::cout << bs.size() << std::endl;
+
     }
 
     inline void shortCut(std::vector<Eigen::MatrixX4d> &hpolys)
     {
-        // 精简飞行走廊
         std::vector<Eigen::MatrixX4d> htemp = hpolys;
-        // 如果多面体只有一个，复制一个？
         if (htemp.size() == 1)
         {
             Eigen::MatrixX4d headPoly = htemp.front();
@@ -207,7 +198,7 @@ namespace sfc_gen
         }
         hpolys.clear();
 
-        int M = htemp.size();   // 凸面体个数
+        int M = htemp.size();
         Eigen::MatrixX4d hPoly;
         bool overlap;
         std::deque<int> idices;
@@ -218,24 +209,20 @@ namespace sfc_gen
             {
                 if (j < i - 1)
                 {
-                    // 向前检查是否重叠
                     overlap = geo_utils::overlap(htemp[i], htemp[j], 0.01);
                 }
                 else
                 {
-                    // 相邻两个点重叠
                     overlap = true;
                 }
                 if (overlap)
                 {
-                    // 如果重叠，则记录该多面体的下标
                     idices.push_front(j);
                     i = j + 1;
                     break;
                 }
             }
         }
-        // 将目标多面体返回
         for (const auto &ele : idices)
         {
             hpolys.push_back(htemp[ele]);

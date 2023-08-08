@@ -43,6 +43,7 @@ namespace geo_utils
     inline bool findInterior(const Eigen::MatrixX4d &hPoly,
                              Eigen::Vector3d &interior)
     {
+        // 寻找多面体内一个比较深的点
         const int m = hPoly.rows();
 
         Eigen::MatrixX4d A(m, 4);
@@ -66,6 +67,8 @@ namespace geo_utils
                         const double eps = 1.0e-6)
 
     {
+        // 判断是否重叠
+        // 寻找并集中的一个内点
         const int m = hPoly0.rows();
         const int n = hPoly1.rows();
         Eigen::MatrixX4d A(m + n, 4);
@@ -84,6 +87,8 @@ namespace geo_utils
         return minmaxsd < -eps && !std::isinf(minmaxsd);
     }
 
+    // 简单的过滤器
+    // 按照xyz顺序进行比较
     struct filterLess
     {
         inline bool operator()(const Eigen::Vector3d &l,
@@ -101,15 +106,16 @@ namespace geo_utils
                          const double &epsilon,
                          Eigen::Matrix3Xd &fV)
     {
+        // 对三维空间点进行去重
         const double mag = std::max(fabs(rV.maxCoeff()), fabs(rV.minCoeff()));
         const double res = mag * std::max(fabs(epsilon) / mag, DBL_EPSILON);
-        std::set<Eigen::Vector3d, filterLess> filter;
+        std::set<Eigen::Vector3d, filterLess> filter;   // 用于插入和查找
         fV = rV;
         int offset = 0;
         Eigen::Vector3d quanti;
         for (int i = 0; i < rV.cols(); i++)
         {
-            quanti = (rV.col(i) / res).array().round();
+            quanti = (rV.col(i) / res).array().round(); // 取整
             if (filter.find(quanti) == filter.end())
             {
                 filter.insert(quanti);
@@ -125,7 +131,7 @@ namespace geo_utils
     // h0*x + h1*y + h2*z + h3 <= 0
     // proposed epsilon is 1.0e-6
     inline void enumerateVs(const Eigen::MatrixX4d &hPoly,
-                            const Eigen::Vector3d &inner,
+                            const Eigen::Vector3d &inner /*hPoly的内点*/,
                             Eigen::Matrix3Xd &vPoly,
                             const double epsilon = 1.0e-6)
     {
