@@ -534,7 +534,7 @@ namespace minco
 
         inline void getEnergy(double &energy) const
         {
-            // minimal acceleration
+            // minimal jerk
             energy = 0.0;
             for (int i = 0; i < N; i++)
             {
