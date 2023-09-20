@@ -498,7 +498,7 @@ namespace gcopter
             Eigen::Map<const Eigen::VectorXd> xi(x.data() + dimTau, dimXi);
             Eigen::Map<Eigen::VectorXd> gradTau(g.data(), dimTau);
             Eigen::Map<Eigen::VectorXd> gradXi(g.data() + dimTau, dimXi);
-+
+
             forwardT(tau, obj.times);
             forwardP(xi, obj.vPolyIdx, obj.vPolytopes, obj.points);
 
