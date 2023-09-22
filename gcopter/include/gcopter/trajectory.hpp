@@ -201,6 +201,7 @@ public:
             // we should make sure that the left and the right output > 0 first.
             double l = -0.0625;
             double r = 1.0625;
+            // 如果一开始值就是0.0，岂不是会死循环？
             while (fabs(RootFinder::polyVal(coeff.head(N - 1), l)) < DBL_EPSILON)
             {
                 l = 0.5 * l;    // close to 0
